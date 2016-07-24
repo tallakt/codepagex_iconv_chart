@@ -8,8 +8,12 @@ defmodule CodepagexIconvChart do
     IO.puts Enum.join(~w(processes string_size codepagex iconv_ratio), "\t")
     for p <- @parallellism, s <- string_list do
       size = String.length s
-      codepagex = take_time_many(p, fn _ -> Codepagex.from_string!(s, :iso_8859_1) end)
-      iconv = take_time_many(p, fn _ -> :iconv.convert("utf-8", "iso-8859-1", s) end)
+      codepagex =
+        take_time_many(p, fn _ -> Codepagex.from_string!(s, :iso_8859_1) end)
+        |> time_to_per_megabyte(s)
+      iconv =
+        take_time_many(p, fn _ -> :iconv.convert("utf-8", "iso-8859-1", s) end)
+        |> time_to_per_megabyte(s)
       IO.puts Enum.join([p, size, codepagex, iconv, codepagex / iconv], "\t")
     end
   end
@@ -21,15 +25,18 @@ defmodule CodepagexIconvChart do
     |> Enum.reverse
   end
 
+  defp time_to_per_megabyte(time, str), do: time / byte_size(str) * 1024 * 1024
+
   defp take_time_many(parallellism, fun) do
-    take_time(fn -> run_many(parallellism, fun) end)
+    t0 = take_time(fn -> run_many(parallellism, fn _ -> nil end) end)
+    take_time(fn -> run_many(parallellism, fun) end) - t0
   end
 
   defp run_many(parallellism, fun) do
     n = div(5000, parallellism)
     tasks = for _ <- 1..parallellism, do: Task.async(fn -> Stream.map(1..n, fun) |> Enum.count end)
     Task.yield_many(tasks, 20_000)
-    |> Enum.map(fn {_, {:ok, res}} -> res end)
+    |> Stream.map(fn {_, {:ok, res}} -> res end)
     |> Enum.reduce(&(&1 + &2))
   end
 
